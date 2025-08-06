@@ -54,4 +54,4 @@ jobs:
         tool: cargo-deny
 
     - name: Audit dependencies for CVEs
-      run: cargo deny check advisories --no-warnings
+      run: cargo deny check advisories
