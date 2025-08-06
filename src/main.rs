@@ -1,6 +1,6 @@
-use zbus::{Connection, MessageStream, Proxy, Result};
+use zbus::{Connection, Proxy, Result};
 use zvariant::OwnedObjectPath;
-use tokio_stream::StreamExt;
+use futures::stream::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -39,16 +39,27 @@ async fn main() -> Result<()> {
     .await?;
 
     // Subscribe to ItemNew signals
-    let mut item_new_signals = browser_proxy.receive_signal("ItemNew").await?;
+    let item_new_signals = browser_proxy.receive_signal("ItemNew").await?;
+    let item_remove_signals = browser_proxy.receive_signal("ItemRemove").await?;
 
-    println!("Listening for Avahi service announcements...");
+    // Merge the two streams into one
+    let mut combined = futures::stream::select(item_new_signals, item_remove_signals);
 
-    while let Some(signal) = item_new_signals.next().await {
+    while let Some(signal) = combined.next().await {
         let msg = signal;
-        let (interface, protocol, name, stype, domain, flags): (i32, i32, String, String, String, u32) =
-            msg.body().deserialize()?;
-
-        println!("New service: {:?}", (interface, protocol, name, stype, domain, flags));
+        match msg.header().member().map(|m| m.as_str()) {
+            Some("ItemNew") => {
+                let (interface, protocol, name, stype, domain, flags): (i32, i32, String, String, String, u32) =
+                    msg.body().deserialize()?;
+                println!("New service: {:?}", (interface, protocol, name, stype, domain, flags));
+            }
+            Some("ItemRemove") => {
+                let (interface, protocol, name, stype, domain, flags): (i32, i32, String, String, String, u32) =
+                    msg.body().deserialize()?;
+                println!("Removed service: {:?}", (interface, protocol, name, stype, domain, flags));
+            }
+            _ => {}
+        }
     }
 
     Ok(())
