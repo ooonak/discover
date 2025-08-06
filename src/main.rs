@@ -1,6 +1,6 @@
+use futures::stream::StreamExt;
 use zbus::{Connection, Proxy, Result};
 use zvariant::OwnedObjectPath;
-use futures::stream::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -23,7 +23,7 @@ async fn main() -> Result<()> {
     let browser_path: OwnedObjectPath = proxy
         .call(
             "ServiceBrowserNew",
-            &( -1i32, -1i32, service_type, "".to_string(), 0u32 ),
+            &(-1i32, -1i32, service_type, "".to_string(), 0u32),
         )
         .await?;
 
@@ -49,14 +49,32 @@ async fn main() -> Result<()> {
         let msg = signal;
         match msg.header().member().map(|m| m.as_str()) {
             Some("ItemNew") => {
-                let (interface, protocol, name, stype, domain, flags): (i32, i32, String, String, String, u32) =
-                    msg.body().deserialize()?;
-                println!("New service: {:?}", (interface, protocol, name, stype, domain, flags));
+                let (interface, protocol, name, stype, domain, flags): (
+                    i32,
+                    i32,
+                    String,
+                    String,
+                    String,
+                    u32,
+                ) = msg.body().deserialize()?;
+                println!(
+                    "New service: {:?}",
+                    (interface, protocol, name, stype, domain, flags)
+                );
             }
             Some("ItemRemove") => {
-                let (interface, protocol, name, stype, domain, flags): (i32, i32, String, String, String, u32) =
-                    msg.body().deserialize()?;
-                println!("Removed service: {:?}", (interface, protocol, name, stype, domain, flags));
+                let (interface, protocol, name, stype, domain, flags): (
+                    i32,
+                    i32,
+                    String,
+                    String,
+                    String,
+                    u32,
+                ) = msg.body().deserialize()?;
+                println!(
+                    "Removed service: {:?}",
+                    (interface, protocol, name, stype, domain, flags)
+                );
             }
             _ => {}
         }
