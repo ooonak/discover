@@ -48,6 +48,7 @@ async fn main() -> Result<()> {
     while let Some(signal) = combined.next().await {
         let msg = signal;
         match msg.header().member().map(|m| m.as_str()) {
+            // We typically get two events, one for IPv4 and IPv6.
             Some("ItemNew") => {
                 let (interface, protocol, name, stype, domain, flags): (
                     i32,
@@ -57,10 +58,82 @@ async fn main() -> Result<()> {
                     String,
                     u32,
                 ) = msg.body().deserialize()?;
+
+                println!("----------------");
+
                 println!(
                     "New service: {:?}",
-                    (interface, protocol, name, stype, domain, flags)
+                    (
+                        interface,
+                        protocol,
+                        name.clone(),
+                        stype,
+                        domain.clone(),
+                        flags
+                    )
                 );
+
+                // Resolve it
+                // We call ResolveService manually with the fields we got from ItemNew, link is by data (name, type, domain).
+                let resolver_proxy = Proxy::new(
+                    &connection,
+                    "org.freedesktop.Avahi",
+                    "/",
+                    "org.freedesktop.Avahi.Server",
+                )
+                .await?;
+
+                // Call ResolveService asynchronously
+                let resolved: (
+                    i32,          // interface
+                    i32,          // protocol
+                    String,       // name
+                    String,       // type
+                    String,       // domain
+                    String,       // host
+                    i32,          // address protocol
+                    String,       // address (e.g., "192.168.1.123" or "fe80::...")
+                    u16,          // port
+                    Vec<Vec<u8>>, // TXT records
+                    u32,          // flags
+                ) = resolver_proxy
+                    .call(
+                        "ResolveService",
+                        &(
+                            interface,
+                            protocol,
+                            name,
+                            service_type,
+                            domain,
+                            -1i32, // protocol to resolve
+                            0u32,  // flags
+                        ),
+                    )
+                    .await?;
+
+                let (
+                    if_idx,
+                    proto,
+                    name,
+                    stype,
+                    domain,
+                    host_name,
+                    addr_proto,
+                    address,
+                    port,
+                    txt_records,
+                    flags,
+                ) = resolved;
+
+                println!(
+                    "Resolved: if_idx: {if_idx}, proto: {proto}, name: {name}, stype: {stype}, domain: {domain}, host_name: {host_name}, addr_proto: {addr_proto}, address: {address}, port: {port}, flags: {flags}"
+                );
+
+                for txt in txt_records {
+                    if let Ok(s) = String::from_utf8(txt.clone()) {
+                        println!("  TXT: {s}");
+                    }
+                }
             }
             Some("ItemRemove") => {
                 let (interface, protocol, name, stype, domain, flags): (
@@ -71,6 +144,8 @@ async fn main() -> Result<()> {
                     String,
                     u32,
                 ) = msg.body().deserialize()?;
+
+                println!("----------------");
                 println!(
                     "Removed service: {:?}",
                     (interface, protocol, name, stype, domain, flags)
