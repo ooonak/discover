@@ -1,4 +1,5 @@
 use std::slice;
+use log::info;
 
 use crate::domain::{Device, DeviceListener, ViewUpdates};
 
@@ -15,7 +16,7 @@ impl<'a, T: ViewUpdates + 'a> DiscoverService<'a, T> {
 impl<'a, T: ViewUpdates + 'a> DeviceListener for DiscoverService<'a, T> {
     fn on_device_discovered(&self, device: Device) {
         
-        println!("DiscoverService (application), new device from driving port (DeviceListener), forwarding to driven port (Viewupdates): {:?}", device);
+        info!("From driving port (DeviceListener), forwarding to driven port (Viewupdates)");
         
         self.ui.display_devices(slice::from_ref(&device));
     }
