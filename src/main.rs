@@ -2,8 +2,21 @@ use futures::stream::StreamExt;
 use zbus::{Connection, Proxy, Result};
 use zvariant::OwnedObjectPath;
 
+mod domain;
+mod application;
+mod interface;
+
+fn main2() {
+    let ui = interface::SimpleConsoleUi{};
+    let discover_service = application::DiscoverService::new(&ui);
+    let avahi_device_listener = interface::AvahiDeviceListener::new(&discover_service);
+    avahi_device_listener.listen();
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    main2();
+
     let connection = Connection::system().await?;
 
     // Create a proxy for the Avahi server
@@ -15,7 +28,7 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    let service_type = "_googlecast._tcp";
+    let service_type = "_discover._tcp";
 
     // ServiceBrowserNew asks the Avahi daemon to start browsing for services of a given type, interface, and domain.
     // -1 as interface, protocol = 0 = AVAHI_PROTO_UNSPEC

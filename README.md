@@ -1,5 +1,19 @@
 # Discover
 
+## Usage
+
+For a quick spin, one can just advertise a fake service like this.
+
+```
+$ avahi-publish-service "TestDevice" _discover._tcp 0 hw=deadbeef sn=12345678
+```
+
+And then run the application from another console.
+
+```
+$ cargo run
+```
+
 ## Overview
 
 Discover is a TUI application used to discover devices. It's a Linux application that uses the Avahi protocol via D-BUS.
