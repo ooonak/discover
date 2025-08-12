@@ -11,7 +11,7 @@ $ avahi-publish-service "TestDevice" _discover._tcp 0 hw=deadbeef sn=12345678
 And then run the application from another console.
 
 ```
-$ cargo run
+$ RUST_LOG=info cargo run
 ```
 
 ## Overview

@@ -1,0 +1,37 @@
+@startuml
+skinparam componentStyle rectangle
+
+package "Interface (Adapters)" {
+  [AvahiDeviceListener]
+  [UI / CLI / TUI Adapters]
+}
+
+package "Application (Use Cases)" {
+  [DiscoverService]
+  [UserActionListener]
+}
+
+package "Domain (Business Logic)" {
+  [Device]
+  [DeviceListener (Port)]
+  [ViewUpdates (Port)]
+}
+
+package "Infrastructure" {
+  [Database]
+  [Network]
+  [Other Services]
+}
+
+[Main.rs] --> [AvahiDeviceListener]
+[Main.rs] --> [UI / CLI / TUI Adapters]
+[Main.rs] --> [DiscoverService]
+[Main.rs] --> [Database]
+
+[AvahiDeviceListener] --> [DeviceListener (Port)]
+[UI / CLI / TUI Adapters] --> [UserActionListener]
+[DiscoverService] --> [Device]
+[DiscoverService] --> [ViewUpdates (Port)]
+[DiscoverService] --> [DeviceListener (Port)]
+
+@enduml

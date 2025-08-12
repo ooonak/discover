@@ -15,6 +15,8 @@ fn main2() {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    env_logger::init();
+    
     main2();
 
     let connection = Connection::system().await?;

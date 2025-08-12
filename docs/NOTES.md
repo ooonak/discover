@@ -9,7 +9,7 @@ This project follows **Domain-Driven Design (DDD)** and **Hexagonal Architecture
 ```
 .
 ├── application
-│   ├── discovery_service.rs
+│   ├── discover_service.rs
 │   └── user_action_listener.rs
 ├── domain
 │   ├── device_listener.rs
