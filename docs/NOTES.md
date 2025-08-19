@@ -114,6 +114,14 @@ $ busctl introspect org.freedesktop.Avahi / org.freedesktop.Avahi.Server
 # For code generation
 $ busctl introspect --xml-interface org.freedesktop.Avahi / org.freedesktop.Avahi.Server > avahi-server-interface.xml
 $ zbus-xmlgen file avahi-server-interface
+```
+
+I ended up downloading the official Avahi interface definitions from https://git.0pointer.net/avahi.git/tree/avahi-daemon/
+
+```bash
+$ zbus-xmlgen file docs/Server.xml 
+$ zbus-xmlgen file docs/ServiceBrowserIntrospect.xml 
+$ zbus-xmlgen file docs/ServiceResolverIntrospect.xml 
 
 # Or just. The same object path contains two interfaces, Server2 is a newer, extended version of Server.
 $ zbus-xmlgen system org.freedesktop.Avahi /

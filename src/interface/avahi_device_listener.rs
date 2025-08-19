@@ -1,11 +1,18 @@
 use crate::domain::DeviceListener;
 use futures::stream::StreamExt;
 use std::result::Result;
-use zbus::{Connection, Proxy};
-use zvariant::OwnedObjectPath;
+use zbus::Connection;
 
-// Just inline the code under its own module
-include!("server2.rs");
+// Inline the code generated from introspection under its own module
+include!("server.rs");
+include!("service_browser.rs");
+include!("service_resolver.rs");
+
+const AVAHI_PROTO_UNSPEC: i32 = -1;
+const AVAHI_PROTO_INET: i32 = 0;
+const AVAHI_PROTO_INET6: i32 = 1;
+const AVAHI_IF_UNSPEC: i32 = -1;
+const AVAHI_IF_LOCAL: i32 = 0;
 
 // An adapter, a specific implementation for a driving port.
 pub struct AvahiDeviceListener<'a, T: DeviceListener + 'a> {
@@ -23,103 +30,79 @@ impl<'a, T: DeviceListener + 'a> AvahiDeviceListener<'a, T> {
         let connection = Connection::system().await?;
 
         // Connect to Avahi server
-        let proxy = Server2Proxy::new(&connection).await?;
-
-        let service_type = "_discover._tcp";
+        let server = ServerProxy::builder(&connection)
+            .destination("org.freedesktop.Avahi")?
+            .path("/")?
+            .build()
+            .await?;
 
         // ServiceBrowserNew asks the Avahi daemon to start browsing for services of a given type, interface, and domain.
         // -1 as interface, protocol = 0 = AVAHI_PROTO_UNSPEC
         // Type = "e.g. _http._tcp", domain = "", flags = 0
-        let browser_path: OwnedObjectPath = proxy
-            .0
-            .call(
-                "ServiceBrowserNew",
-                &(-1i32, -1i32, service_type, "".to_string(), 0u32),
+        let browser_path = server
+            .service_browser_new(
+                AVAHI_IF_UNSPEC,
+                AVAHI_PROTO_INET,
+                "_discover._tcp",
+                "",
+                0,
             )
             .await?;
 
-        // Create a proxy for that new object path with interface org.freedesktop.Avahi.ServiceBrowser.
-        // The ServiceBrowser proxy represents a remote D-Bus object
-        // This object emits signals like: ItemNew, ItemRemove
-        let browser_proxy = Proxy::new(
-            &connection,
-            "org.freedesktop.Avahi",
-            browser_path.as_str(),
-            "org.freedesktop.Avahi.ServiceBrowser",
-        )
-        .await?;
+        // ServiceBrowserNew asks the Avahi daemon to start browsing for services of a given type, interface, and domain.
+        let proxy = ServiceBrowserProxy::builder(&connection)
+            .destination("org.freedesktop.Avahi")?
+            .path(browser_path.clone())?
+            .build()
+            .await?;
 
-        // Subscribe to ItemNew signals
-        let item_new_signals = browser_proxy.receive_signal("ItemNew").await?;
-        let item_remove_signals = browser_proxy.receive_signal("ItemRemove").await?;
+        handle_new_services(&connection, &proxy).await?;
+        handle_removed_services(&proxy).await?;
 
-        // Merge the two streams into one
-        let mut combined = futures::stream::select(item_new_signals, item_remove_signals);
+        // Keep running
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
 
-        while let Some(signal) = combined.next().await {
-            let msg = signal;
-            match msg.header().member().map(|m| m.as_str()) {
-                // We typically get two events, one for IPv4 and IPv6.
-                Some("ItemNew") => {
-                    let (interface, protocol, name, stype, domain, flags): (
-                        i32,
-                        i32,
-                        String,
-                        String,
-                        String,
-                        u32,
-                    ) = msg.body().deserialize()?;
+        proxy.free().await?;
+        Ok(())
+    }
+}
 
-                    log::info!(
-                        "New service: {:?}",
-                        (
-                            interface,
-                            protocol,
-                            name.clone(),
-                            stype,
-                            domain.clone(),
-                            flags
-                        )
-                    );
+async fn handle_new_services(
+    connection: &Connection,
+    browser: &ServiceBrowserProxy<'_>,
+) -> zbus::Result<()> {
+    let mut stream = browser.receive_item_new().await?;
 
-                    // Resolve it
-                    // We call ResolveService manually with the fields we got from ItemNew, link is by data (name, type, domain).
-                    let resolver_proxy = Proxy::new(
-                        &connection,
-                        "org.freedesktop.Avahi",
-                        "/",
-                        "org.freedesktop.Avahi.Server",
+    let conn = connection.clone();
+    tokio::spawn(async move {
+        while let Some(signal) = stream.next().await {
+            if let Ok(args) = signal.args() {
+                log::info!(
+                    "New service: ({}, {}, {}, {}, {}, {})",
+                    args.interface,
+                    args.protocol,
+                    args.name,
+                    args.type_,
+                    args.domain,
+                    args.name
+                );
+
+                // Resolve service
+                let server = ServerProxy::new(&conn).await.unwrap();
+                if let Ok(resolved) = server
+                    .resolve_service(
+                        args.interface,
+                        args.protocol,
+                        &args.name,
+                        &args.type_,
+                        &args.domain,
+                        -1, // aprotocol
+                        0,  // flags
                     )
-                    .await?;
-
-                    // Call ResolveService asynchronously
-                    let resolved: (
-                        i32,          // interface
-                        i32,          // protocol
-                        String,       // name
-                        String,       // type
-                        String,       // domain
-                        String,       // host
-                        i32,          // address protocol
-                        String,       // address (e.g., "192.168.1.123" or "fe80::...")
-                        u16,          // port
-                        Vec<Vec<u8>>, // TXT records
-                        u32,          // flags
-                    ) = resolver_proxy
-                        .call(
-                            "ResolveService",
-                            &(
-                                interface,
-                                protocol,
-                                name,
-                                service_type,
-                                domain,
-                                -1i32, // protocol to resolve
-                                0u32,  // flags
-                            ),
-                        )
-                        .await?;
-
+                    .await
+                {
                     let (
                         if_idx,
                         proto,
@@ -134,37 +117,57 @@ impl<'a, T: DeviceListener + 'a> AvahiDeviceListener<'a, T> {
                         flags,
                     ) = resolved;
 
-                    println!(
-                        "Resolved: if_idx: {if_idx}, proto: {proto}, name: {name}, stype: {stype}, domain: {domain}, host_name: {host_name}, addr_proto: {addr_proto}, address: {address}, port: {port}, flags: {flags}"
+                    log::info!(
+                        "Resolved: if_idx={if_idx}, proto={proto}, name={name}, stype={stype}, \
+                         domain={domain}, host_name={host_name}, addr_proto={addr_proto}, \
+                         address={address}, port={port}, flags={flags}"
                     );
 
                     for txt in txt_records {
-                        if let Ok(s) = String::from_utf8(txt.clone()) {
+                        if let Ok(s) = String::from_utf8(txt) {
                             log::info!("  TXT: {s}");
                         }
                     }
                 }
-                Some("ItemRemove") => {
-                    let (interface, protocol, name, stype, domain, flags): (
-                        i32,
-                        i32,
-                        String,
-                        String,
-                        String,
-                        u32,
-                    ) = msg.body().deserialize()?;
-
-                    log::info!(
-                        "Removed service: {:?}",
-                        (interface, protocol, name, stype, domain, flags)
-                    );
-                }
-                _ => {
-                    log::info!("Some other event");
-                }
+            } else {
+                log::warn!(
+                    "Failed to parse args in signal: member={:?}, interface={:?}, signature={:?}",
+                    signal.message().header().member(),
+                    signal.message().header().interface(),
+                    signal.message().header().signature()
+                );
             }
         }
+    });
 
-        Ok(())
-    }
+    Ok(())
+}
+
+async fn handle_removed_services(browser: &ServiceBrowserProxy<'_>) -> zbus::Result<()> {
+    let mut stream = browser.receive_item_remove().await?;
+
+    tokio::spawn(async move {
+        while let Some(signal) = stream.next().await {
+            if let Ok(args) = signal.args() {
+                log::info!(
+                    "Removed service: ({}, {}, {}, {}, {}, {})",
+                    args.interface,
+                    args.protocol,
+                    args.name,
+                    args.type_,
+                    args.domain,
+                    args.name
+                );
+            } else {
+                log::warn!(
+                    "Failed to parse args in signal: member={:?}, interface={:?}, signature={:?}",
+                    signal.message().header().member(),
+                    signal.message().header().interface(),
+                    signal.message().header().signature()
+                );
+            }
+        }
+    });
+
+    Ok(())
 }
